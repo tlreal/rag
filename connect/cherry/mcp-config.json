@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "shared-brain": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["D:\\tools\\githubfiel\\rag\\src\\mcp-proxy.cjs"]
+    }
+  }
+}
