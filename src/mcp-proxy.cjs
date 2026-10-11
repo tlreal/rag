@@ -4,9 +4,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const readline = require('node:readline');
+const { spawn } = require('node:child_process');
 
 const ROOT = path.join(__dirname, '..');
 const STATE_FILE = path.join(ROOT, 'data', 'daemon.json');
+const DAEMON = path.join(__dirname, 'daemon.cjs');
 const BASE = process.env.SB_URL || 'http://127.0.0.1:' + (Number(process.env.SB_PORT) || 47623);
 
 function state() {
@@ -14,14 +16,33 @@ function state() {
   return { base: BASE, token: st.token, port: st.port };
 }
 
+let revived = false;
 async function api(method, p, body) {
   const { base, token } = state();
-  const res = await fetch(base + p, {
+  const go = () => fetch(base + p, {
     method,
     headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   });
-  return res.json();
+  try {
+    return await (await go()).json();
+  } catch (e) {
+    // 守护进程不在：自愈拉起（每代理进程限一次），再试一次
+    if (!revived && /fetch failed|ECONNREFUSED/i.test(String(e))) {
+      revived = true;
+      try {
+        const out = fs.openSync(path.join(ROOT, 'data', 'daemon.out.log'), 'a');
+        const err = fs.openSync(path.join(ROOT, 'data', 'daemon.err.log'), 'a');
+        const child = spawn(process.execPath, [DAEMON], {
+          detached: true, stdio: ['ignore', out, err], cwd: ROOT,
+        });
+        child.unref();
+      } catch {}
+      await new Promise(r => setTimeout(r, 1500));
+      return await (await go()).json();
+    }
+    throw e;
+  }
 }
 
 // —— MCP 工具定义（恰好三个，§7.1）——
